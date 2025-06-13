@@ -4,6 +4,7 @@ import com.falesdev.flowtask.domain.RegisterType;
 import com.falesdev.flowtask.domain.dto.request.RegisterRequest;
 import com.falesdev.flowtask.domain.dto.response.AuthResponse;
 import com.falesdev.flowtask.domain.dto.response.AuthUserResponse;
+import com.falesdev.flowtask.domain.dto.response.MiniOnBoardingRequest;
 import com.falesdev.flowtask.domain.dto.response.PasswordResetTokenResponse;
 import com.falesdev.flowtask.domain.entity.Role;
 import com.falesdev.flowtask.domain.entity.User;
@@ -30,6 +31,8 @@ import io.jsonwebtoken.JwtException;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.*;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -39,10 +42,17 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -50,6 +60,12 @@ public class AuthenticationServiceImpl implements AuthenticationService {
 
     @Value("${imagekit.url-endpoint}")
     private String imagekitUrlEndpoint;
+
+    @Value("${github.client.android.id}")
+    private String githubClientId;
+
+    @Value("${github.secret.android.id}")
+    private String githubClientSecret;
 
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
@@ -63,6 +79,18 @@ public class AuthenticationServiceImpl implements AuthenticationService {
     private final OAuth2UserManagementService oAuth2UserManagementService;
     private final GoogleIdTokenVerifier verifier;
     private final OtpRepository otpRepository;
+
+    @Override
+    @Transactional(readOnly = true)
+    public MiniOnBoardingRequest getStarted() {
+        String imageUrl = imagekitUrlEndpoint + "/get-started.png";
+        List<String> functions = Arrays.asList("Crear tarea", "Establecer recordatorios", "Seguimiento del progreso");
+        return MiniOnBoardingRequest.builder()
+                .started("Empezar")
+                .functions(functions)
+                .imageUrl(imageUrl)
+                .build();
+    }
 
     @Override
     @Transactional
@@ -181,6 +209,89 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 roleMapper.toDto(user.getRole()),
                 user.getImageURL()
         );
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse handleGithubAuth(String code) {
+        String accessToken = exchangeCodeForAccessToken(code);
+        Map<String, Object> userAttributes = getGithubUserInfo(accessToken);
+        User user = oAuth2UserManagementService.createOrUpdateUserFromGithub(userAttributes);
+        return generateAuthResponse(user);
+    }
+
+    private String exchangeCodeForAccessToken(String code) {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+
+        MultiValueMap<String, String> requestBody = new LinkedMultiValueMap<>();
+        requestBody.add("client_id", githubClientId);
+        requestBody.add("client_secret", githubClientSecret);
+        requestBody.add("code", code);
+        requestBody.add("redirect_uri", "com.dadky.noteapp://callback");
+
+        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(requestBody, headers);
+
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                "https://github.com/login/oauth/access_token",
+                HttpMethod.POST,
+                request,
+                new ParameterizedTypeReference<Map<String, Object>>() {}
+        );
+
+        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+            return (String) response.getBody().get("access_token");
+        } else {
+            throw new AuthenticationException("Failed to exchange code for access token");
+        }
+    }
+
+    public Map<String, Object> getGithubUserInfo(String accessToken) {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(accessToken);
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        HttpEntity<?> entity = new HttpEntity<>(headers);
+
+        // 1. Obtener perfil
+        ResponseEntity<Map<String, Object>> userResponse = restTemplate.exchange(
+                "https://api.github.com/user",
+                HttpMethod.GET,
+                entity,
+                new ParameterizedTypeReference<>() {}
+        );
+
+        if (userResponse.getStatusCode() != HttpStatus.OK || userResponse.getBody() == null) {
+            throw new AuthenticationException("Invalid GitHub access token");
+        }
+
+        Map<String, Object> userAttributes = userResponse.getBody();
+
+        // 2. Obtener email si no viene directo
+        if (userAttributes.get("email") == null) {
+            ResponseEntity<List<Map<String, Object>>> emailsResponse = restTemplate.exchange(
+                    "https://api.github.com/user/emails",
+                    HttpMethod.GET,
+                    entity,
+                    new ParameterizedTypeReference<>() {}
+            );
+
+            if (emailsResponse.getStatusCode() == HttpStatus.OK && emailsResponse.getBody() != null) {
+                for (Map<String, Object> emailEntry : emailsResponse.getBody()) {
+                    if (Boolean.TRUE.equals(emailEntry.get("primary")) && Boolean.TRUE.equals(emailEntry.get("verified"))) {
+                        userAttributes.put("email", emailEntry.get("email"));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (userAttributes.get("email") == null) {
+            throw new AuthenticationException("No verified email found in GitHub profile");
+        }
+
+        return userAttributes;
     }
 
     private GoogleIdToken.Payload validateIdToken(String idToken) {

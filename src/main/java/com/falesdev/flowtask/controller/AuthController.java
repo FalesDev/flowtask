@@ -3,6 +3,7 @@ package com.falesdev.flowtask.controller;
 import com.falesdev.flowtask.domain.dto.request.*;
 import com.falesdev.flowtask.domain.dto.response.AuthResponse;
 import com.falesdev.flowtask.domain.dto.response.AuthUserResponse;
+import com.falesdev.flowtask.domain.dto.response.MiniOnBoardingRequest;
 import com.falesdev.flowtask.domain.dto.response.PasswordResetTokenResponse;
 import com.falesdev.flowtask.security.FlowUserDetails;
 import com.falesdev.flowtask.service.AuthenticationService;
@@ -20,6 +21,11 @@ public class AuthController {
 
     private final AuthenticationService authenticationService;
     private final RefreshTokenService refreshTokenService;
+
+    @GetMapping(path = "/started")
+    public ResponseEntity<MiniOnBoardingRequest> getStarted(){
+        return ResponseEntity.ok(authenticationService.getStarted());
+    }
 
     @PostMapping(path = "/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest loginRequest){
@@ -69,6 +75,11 @@ public class AuthController {
         return ResponseEntity.ok(
                 authenticationService.handleGoogleAuth(request.idToken())
         );
+    }
+
+    @PostMapping("/github")
+    public ResponseEntity<AuthResponse> githubAuth(@RequestBody GithubAuthRequest request) {
+        return ResponseEntity.ok(authenticationService.handleGithubAuth(request.code()));
     }
 
     @PostMapping("/refresh")

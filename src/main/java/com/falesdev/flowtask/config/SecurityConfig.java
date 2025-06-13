@@ -84,12 +84,17 @@ public class SecurityConfig {
                         ).permitAll()
 
                         // Endpoints de autenticación
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/auth/started"
+                        ).permitAll()
                         .requestMatchers(HttpMethod.POST,
+                                "/api/v1/auth/started",
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/password",
                                 "/api/v1/auth/password/**",
                                 "/api/v1/auth/google",
+                                "/api/v1/auth/github",
                                 "/api/v1/auth/refresh"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET,"/api/v1/auth/me").authenticated()

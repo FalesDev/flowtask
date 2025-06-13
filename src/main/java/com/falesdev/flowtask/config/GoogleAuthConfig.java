@@ -12,17 +12,17 @@ import java.util.Collections;
 @Configuration
 public class GoogleAuthConfig {
 
-    @Value("${google.client.android.id}")
-    private String androidClientId;
+    @Value("${google.client.web.id}")
+    private String webClientId;
 
     @Bean
     public GoogleIdTokenVerifier googleIdTokenVerifier() {
-        if (androidClientId == null || androidClientId.isBlank()) {
+        if (webClientId == null || webClientId.isBlank()) {
             throw new IllegalStateException("Google Web Client ID not configured");
         }
 
         return new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
-                .setAudience(Collections.singletonList(androidClientId))
+                .setAudience(Collections.singletonList(webClientId))
                 .build();
     }
 }

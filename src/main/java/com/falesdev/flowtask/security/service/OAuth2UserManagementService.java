@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -50,12 +51,46 @@ public class OAuth2UserManagementService {
                         email,
                         fullName,
                         googlePicture,
-                        username
+                        username,
+                        RegisterType.GOOGLE
                 ));
     }
 
-    private User createNewUser(String email, String fullName, String googlePicture, String username) {
-        String cdnUrl = downloadAndStoreProfileImage(googlePicture, email);
+    public User createOrUpdateUserFromGithub(Map<String, Object> attributes) {
+        String email = (String) attributes.get("email");
+        String login = (String) attributes.get("login");
+        String name = (String) attributes.get("name");
+        String avatarUrl = (String) attributes.get("avatar_url");
+
+        if (email == null) {
+            email = login + "@users.noreply.github.com";
+        }
+
+        final String finalEmail = email;
+        final String fullName = name != null ? name : login;
+        final String username = generateUniqueUsername(fullName);
+
+
+        return userRepository.findByEmail(finalEmail)
+                .map(existingUser -> updateExistingUser(
+                        existingUser,
+                        fullName,
+                        avatarUrl,
+                        username
+                ))
+                .orElseGet(() -> createNewUser(
+                        finalEmail,
+                        fullName,
+                        avatarUrl,
+                        username,
+                        RegisterType.GITHUB
+                ));
+    }
+
+    private User createNewUser(
+            String email, String fullName, String oauthPicture, String username, RegisterType registerType
+    ) {
+        String cdnUrl = downloadAndStoreProfileImage(oauthPicture, email);
 
         Role defaultRole = roleRepository.findByName("USER")
                 .orElseThrow(() -> new EntityNotFoundException("Role USER not found"));
